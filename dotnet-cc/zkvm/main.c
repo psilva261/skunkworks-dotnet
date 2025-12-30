@@ -36,12 +36,12 @@ void printk(uint32_t val) {
 }
 
 U64 len_input_buf() {
-	uint32_t *ptr_val = (volatile uint32_t *)(INPUT_ADDR+4*2);
+	uint32_t *ptr_val = (uint32_t *)(INPUT_ADDR+4*2);
 	return *ptr_val;
 }
 
 char read_value(U64* i, U64 a, U64 b) {
-	char *ptr_val = (volatile char *)(INPUT_ADDR+4*4+b);
+	char *ptr_val = (char *)(INPUT_ADDR+4*4+b);
 	return *ptr_val;
 }
 
@@ -59,7 +59,7 @@ int main(void) {
 
 	// Initialize WASI
 	if (!wasiInit(test_argc, test_argv, environ)) {
-		fprintf(stderr, "failed to init WASI\n");
+		puts("failed to init WASI\n");
 		return 0;
 	}
 

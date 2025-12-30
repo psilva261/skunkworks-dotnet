@@ -105,12 +105,12 @@ namespace Example
         }
 
         public void memoryTest() {
-            // 180 MB allocated through wasmAllocate
+            // 400 MB allocated through wasmAllocate
             // 512 MB in principle available from ziskemu
             Console.WriteLine("test filling up memory...\n");
 
             int memChunkSz = 1024*1024;
-            int numChunks = 180;
+            int numChunks = 400;
             byte[][] memChunks = new byte[numChunks][];
             var j = 0;
             for (var i = 1; i <= numChunks; i++)

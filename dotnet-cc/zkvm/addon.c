@@ -2,6 +2,60 @@
 
 #include "zkvm.h"
 
+// (just to experiment with optimizations, will likely break)
+#define SKIP_BIG_CHUNKS_MEMSET_ZEROING
+
+#define SKIP_ALLOC_ZEROING
+
+// w2c2 only allocates 3 different buffers. Provide initial
+// size estimates which are updated during runtime.
+int wasmMemoryStructBufSize = sizeof(wasmMemory);
+int wasmFunctionTableBufSize = 0x100000;
+int wasmMemoryDataBufSize = 0x04490000;
+
+size_t strlen(const char *s);
+
+char ** environ = {NULL};
+
+bool wasiInit(int argc, char* argv[], char** envp) {
+    return true;
+}
+
+void writeuartc(const char c) {
+	char *ptr_val = (char *)(0xa0000000+512);
+	*ptr_val = c;
+}
+
+int putchar(int c) {
+    writeuartc(c);
+	return 1;
+}
+
+int puts(const char *s) {
+    for (int i = 0; i < strlen(s); i++) {
+        writeuartc(s[i]);
+    }
+    return strlen(s);
+}
+
+int printf(const char *fmt, ...) {
+    for (int i = 0; i < strlen(fmt); i++) {
+        writeuartc(fmt[i]);
+    }
+    return strlen(fmt);
+}
+
+#define strlen_max 100
+
+size_t strlen(const char *s) {
+    for (int i = 0; i < strlen_max; i++) {
+        if (s[i] == 0) {
+            return i;
+        }
+    }
+    return strlen_max;
+}
+
 typedef enum Trap {
     trapUnreachable,
     trapDivByZero,
@@ -11,11 +65,141 @@ typedef enum Trap {
 } Trap;
 
 void trap(Trap trap) {
-    printk(0x1000eeee);
+    puts("trap(..)\n");
+    switch (trap) {
+    case trapUnreachable:
+        puts("trap: unreachable\n");
+        break;
+    case trapDivByZero:
+        puts("trap: div by zero\n");
+        break;
+    case trapIntOverflow:
+        puts("trap: int overflow\n");
+        break;
+    case trapInvalidConversion:
+        puts("trap: invalid conversion\n");
+        break;
+    case trapAllocationFailed:
+        puts("trap: allocation failed\n");
+        break;
+    default:
+    	puts("trap: code unknown\n");
+    }
+    shutdown();
+    while (1) {}
 }
 
-char ** environ = {NULL};
+bool memory_data_size_ok(size_t size) {
+	return (char*)(HEAP_START + wasmMemoryStructBufSize + wasmFunctionTableBufSize + size) <= (char*)(HEAP_START + HEAP_SIZE);
+}
 
-bool wasiInit(int argc, char* argv[], char** envp) {
-	return true;
+typedef enum alloc_t {
+  wasm_memory_struct_alloc = 1,
+  wasm_function_table_alloc = 2,
+  wasm_memory_data_alloc = 3
+} alloc_t;
+
+// Trivial malloc implementation since the dotnet runtime
+// handles memory on a higher abstraction level. Thus it's
+// called only 3 times during initialization. As an
+// optimization automatically allocate a huge chunk to
+// avoid subsequent realloc calls.
+void *_malloc(size_t size, alloc_t alloc_type) {
+    if (alloc_type == wasm_memory_struct_alloc) {
+        puts("malloc: allocate wasm memory struct\n");
+        return (uint32_t *)HEAP_START;
+    } else if (alloc_type == wasm_function_table_alloc) {
+        puts("malloc: table allocate\n");
+        return (uint32_t *)(HEAP_START + HEAP_SIZE - size - 1);
+    } else {
+       puts("malloc: allocate memory->data\n");
+       if (!memory_data_size_ok(size)) {
+           puts("malloc: not enough space available\n");
+           return 0;
+       }
+       return (uint32_t *)(HEAP_START + wasmMemoryStructBufSize);
+    }
+}
+
+void *calloc(size_t nmemb, size_t size) {
+    puts("calloc()\n");
+    void* ptr;
+    alloc_t alloc_type;
+
+    if (size == sizeof(wasmMemory)) {
+        alloc_type = wasm_memory_struct_alloc;
+    } else if (size == 1) {
+        alloc_type = wasm_memory_data_alloc;
+        // wasmMemoryDataBufSize = size;
+    } else {
+        alloc_type = wasm_function_table_alloc;
+        // wasmFunctionTableBufSize = size;
+    }
+
+    ptr = _malloc(nmemb*size, alloc_type);
+
+#ifndef SKIP_ALLOC_ZEROING
+    rv64_zero(ptr, nmemb*size);
+#endif /* SKIP_ALLOC_ZEROING */
+
+    return ptr;
+}
+
+// Trivial malloc implementation since the dotnet runtime
+// handles memory on a higher abstraction level.
+void free(void *ptr) {
+    puts("free()\n");
+}
+
+static inline void rv64_zero(void *dst, size_t n) {
+    puts("rv64_zero()\n");
+
+    if (n == 0) return;
+
+    memset(dst, 0, n);
+}
+
+void *realloc(void *ptr, size_t size) {
+   if (!memory_data_size_ok(size)) {
+       puts("realloc: not enough space available\n");
+       return 0;
+    }
+    // wasmMemoryDataBufSize = size;
+    return ptr;
+}
+
+// risc-v memcpy, memset, memmove functions
+//
+// memops.S (BSD-2-Clause licensed)
+//
+// https://github.com/avx/riscv_memops
+void *_memcpy(void *dst, const void *src, size_t n);
+void *_memmove(void *dest, const void *src, size_t n);
+void *_memset(void *b, int c, size_t len);
+
+void *memcpy(void *dest, const void *src, size_t n) {
+    return _memcpy(dest, src, n);
+}
+
+void *memmove(void *dest, const void *src, size_t n) {
+	return _memmove(dest, src, n);
+}
+
+void *memset(void *b, int c, size_t len) {
+#ifdef SKIP_BIG_CHUNKS_MEMSET_ZEROING
+    if (len > wasmFunctionTableBufSize && c == 0) {
+        // TODO: make this dependent on initialization status of application!!!
+        // perhaps even obsoleted by: https://github.com/dotnet/runtimelab/commit/cbf8308bd791f6b9610c026c83706ccace1e3be4 (Work around poor inlined memset code quality in LLVM )
+        // also cf https://github.com/dotnet/runtimelab/issues/2628 Zeroing memory (for the GC) is the biggest contributor to startup in a hello world app.
+        printk(0x30303030);
+        return b;
+    }
+#endif /* SKIP_BIG_CHUNKS_MEMSET_ZEROING */
+    return _memset(b, c, len);
+}
+
+void abort(void) {
+    puts("abort()\n");
+    shutdown();
+    while (1) {}
 }

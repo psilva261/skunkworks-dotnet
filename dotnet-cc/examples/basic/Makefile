@@ -1,4 +1,4 @@
-OBJS_ZKVM = main.o startup.o syscalls.o mod0.o addon.o mathfuncs.o wasi.o stubs.o custom_imports.o
+OBJS_ZKVM = main.o startup.o mod0.o addon.o mathfuncs.o wasi.o stubs.o custom_imports.o memops.o
 
 run: basic.bin
 	ziskemu -e ./basic.bin -i riscv.bmp

@@ -124,23 +124,24 @@ struct iovec {
 
 static const size_t ciovecSize = 8;
 
+#define IOVECS_SIZE 10
+
 /* use part of wasi.c from w2c2 here but avoid full implementation */
 U32 wasisnapshotpreview1_fd_write(void* i, U32 wasiFD, U32 ciovecsPointer, U32 ciovecsCount, U32 resultPointer) {
 	wasmMemory* memory = wasiMemory(i);
-	struct iovec* iovecs = NULL;
+	struct iovec iovecs[IOVECS_SIZE];
 	I64 total = 0;
 	/* printf("wasisnapshotpreview1_fd_write\n"); */
 
-	iovecs = malloc(ciovecsCount * sizeof(struct iovec));
-	if (iovecs == NULL) {
-		printf("fd_write: no mem\n");
+	if (ciovecsCount > IOVECS_SIZE) {
+		printf("fd_write: unexpected iovecs\n");
 		return WASI_ERRNO_NOMEM;
 	}
 
 	/* Convert WASI ciovecs to native iovecs */
 	{
 		U32 ciovecIndex = 0;
-		for (; ciovecIndex < ciovecsCount; ciovecIndex++) {
+		for (; ciovecIndex < ciovecsCount && ciovecIndex < IOVECS_SIZE; ciovecIndex++) {
 			U64 ciovecPointer = ciovecsPointer + ciovecIndex * ciovecSize;
 			U32 bufferPointer = i32_load(memory, ciovecPointer);
 			U32 length = i32_load(memory, ciovecPointer + 4);
