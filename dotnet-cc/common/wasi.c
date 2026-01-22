@@ -122,8 +122,16 @@ struct iovec {
 
 #define WASI_ERRNO_NOMEM 48
 
+// Size of a single ciovec item
 static const size_t ciovecSize = 8;
 
+// Number of iovecs to be pre-allocated. Choose a number high enough to
+// let programs work that use file and socket I/O outside of printing to the
+// console. But small enough to raise an error since this stub implementation
+// would likely have to be extended in that case. (On Linux IOV_MAX is 1024)
+//
+// Pre-allocation is done to allow Console.WriteLine to work even when malloc
+// fails.
 #define IOVECS_SIZE 10
 
 /* use part of wasi.c from w2c2 here but avoid full implementation */
